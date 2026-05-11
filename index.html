@@ -28,6 +28,34 @@
     cursor: none;
   }
 
+  /* HORIZEN BLOCK WALL */
+  #hz-block-wall {
+    position: fixed;
+    inset: 0;
+    background: var(--bg);
+    z-index: 999999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    gap: 15px;
+    font-family: 'Orbitron', monospace;
+    color: white;
+  }
+  #hz-block-wall .wall-text {
+    font-size: 16px;
+    color: var(--muted);
+  }
+  #hz-block-wall .wall-spinner {
+    border: 3px solid rgba(0, 229, 155, 0.2);
+    border-top: 3px solid var(--accent);
+    border-radius: 50%;
+    width: 30px;
+    height: 30px;
+    animation: wall-spin 1s linear infinite;
+  }
+  @keyframes wall-spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
   canvas#game {
     display: block;
     position: absolute;
@@ -264,6 +292,80 @@
 </head>
 <body>
 
+<!-- BLOCKING WALL: Blocks screen until check is done -->
+<div id="hz-block-wall">
+  <div class="wall-spinner"></div>
+  <div class="wall-text">Connecting to Arena...</div>
+</div>
+
+<script>
+  const HZ_URL = 'https://xlisbmtenekjmundxbcn.supabase.co';
+  const HZ_KEY = 'sb_publishable_Cvs-AiKPTHrC_tfGfwlpSQ_4Hir5Cva';
+  let hzMyAddress = "";
+
+  async function generateFingerprint() {
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    ctx.textBaseline = 'top';
+    ctx.font = '14px Arial';
+    ctx.fillText('HorizonFP', 2, 2);
+    
+    const raw = canvas.toDataURL() + 
+        navigator.hardwareConcurrency + 
+        screen.width + screen.height + 
+        screen.colorDepth + 
+        new Date().getTimezoneOffset() + 
+        navigator.language;
+
+    let hash = 0;
+    for (let i = 0; i < raw.length; i++) {
+      const char = raw.charCodeAt(i);
+      hash = ((hash << 5) - hash) + char;
+      hash = hash & hash;
+    }
+    return `hz-pc-${Math.abs(hash).toString(36).toUpperCase()}`;
+  }
+
+  (async function() {
+    let computerId = localStorage.getItem('horizen_computer_id');
+    if (!computerId) {
+      computerId = await generateFingerprint();
+      localStorage.setItem('horizen_computer_id', computerId);
+    }
+
+    hzMyAddress = computerId;
+
+    try {
+      const res = await fetch(`${HZ_URL}/rest/v1/users?computer_id=eq.${encodeURIComponent(computerId)}&select=is_blocked`, {
+        headers: { 'apikey': HZ_KEY }
+      });
+      const data = await res.json();
+      
+      if (data.length > 0 && data[0].is_blocked === true) {
+        window.location.replace('https://blocked.horizensearch.com');
+        return; 
+      }
+    } catch (e) {}
+
+    try {
+      const res = await fetch(`${HZ_URL}/rest/v1/users?computer_id=eq.${encodeURIComponent(computerId)}&select=id`, {
+        headers: { 'apikey': HZ_KEY }
+      });
+      const data = await res.json();
+
+      if (data.length === 0) {
+        await fetch(`${HZ_URL}/rest/v1/users`, {
+          method: 'POST',
+          headers: { 'apikey': HZ_KEY, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+          body: JSON.stringify({ computer_id: computerId, nickname: 'Unknown', is_blocked: false })
+        });
+      }
+    } catch (e) {}
+
+    document.getElementById('hz-block-wall').style.display = 'none';
+  })();
+</script>
+
 <canvas id="game"></canvas>
 
 <!-- Start Screen -->
@@ -303,14 +405,14 @@
 <script>
 // ========== CONSTANTS ==========
 const WORLD_SIZE = 5000;
-const FOOD_COUNT = 600;
+const FOOD_COUNT = 1000; // INCREASED FOOD
 const BOT_COUNT = 12;
 const BASE_SPEED = 2.8;
 const BOOST_SPEED = 5.2;
 const SEGMENT_SPACING = 6;
 const INIT_LENGTH = 10;
 const TURN_RATE = 0.08;
-const BOT_TURN_RATE = 0.06;
+const BOT_TURN_RATE = 0.08; // BETTER REFLEXES
 const FOOD_RADIUS = 5;
 const HEAD_RADIUS = 8;
 const BOUNDARY_WARN = 300;
@@ -507,9 +609,9 @@ function updateBotAI(bot) {
 
   // Detect nearby snakes (collision avoidance + hunting)
   let nearestThreat = null;
-  let nearestThreatDist = 200;
+  let nearestThreatDist = 200; // Increased sight range
   let nearestPrey = null;
-  let nearestPreyDist = 250;
+  let nearestPreyDist = 450; // Increased hunt range
 
   const allSnakes = [player, ...bots].filter(s => s && s.alive && s !== bot);
   for (const other of allSnakes) {
@@ -538,7 +640,7 @@ function updateBotAI(bot) {
   }
 
   // Hunt smaller snakes
-  if (nearestPrey && bot.segments.length > 30 && Math.random() < 0.02) {
+  if (nearestPrey && bot.segments.length > 30 && Math.random() < 0.05) { // More aggressive hunting trigger
     bot.aiState = 'hunt';
     bot.aiTarget = nearestPrey;
   }
@@ -564,9 +666,9 @@ function updateBotAI(bot) {
 
   // Find nearest food
   if (bot.aiTimer <= 0) {
-    bot.aiTimer = randInt(15, 40);
+    bot.aiTimer = randInt(10, 30); // Faster decision making
     let bestFood = null;
-    let bestDist = 300;
+    let bestDist = 450; // Look further for food
     for (const f of foods) {
       const d = dist(head.x, head.y, f.x, f.y);
       if (d < bestDist) {
